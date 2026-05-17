@@ -1,0 +1,17 @@
+[package]
+name = "minigraf-python-shim"
+version = "0.0.0"
+edition = "2024"
+publish = false
+description = "Build shim: provides uniffi-bindgen binary for maturin"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/uniffi_bindgen.rs"
+
+[dependencies]
+minigraf-ffi = "1.1.1"
+uniffi = { version = "0.31.1", features = ["cli"] }
+
+[workspace]
+members = ["."]

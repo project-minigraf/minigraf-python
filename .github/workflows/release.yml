@@ -1,0 +1,102 @@
+name: Python Release
+
+on:
+  repository_dispatch:
+    types: [core-release]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g. v1.2.0)'
+        required: true
+        type: string
+
+jobs:
+  set-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "version=${{ github.event.client_payload.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-wheels:
+    name: Build wheel (${{ matrix.os }})
+    needs: set-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build_args: --release --manylinux manylinux_2_34 --out dist
+          - os: ubuntu-24.04-arm
+            build_args: --release --manylinux manylinux_2_34 --out dist
+          - os: macos-14
+            build_args: --release --target universal2-apple-darwin --out dist
+          - os: windows-latest
+            build_args: --release --out dist
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install maturin
+        run: pip install "maturin>=1.5"
+
+      - name: Stamp version into pyproject.toml
+        shell: bash
+        run: |
+          TAG="${{ needs.set-version.outputs.version }}"
+          VERSION="${TAG#v}"
+          python3 -c "
+          import re, pathlib
+          p = pathlib.Path('pyproject.toml')
+          p.write_text(re.sub(r'^version = .*', 'version = \"${VERSION}\"', p.read_text(), flags=re.MULTILINE))
+          "
+
+      - name: Build wheel
+        run: bash build.sh build ${{ matrix.build_args }}
+        shell: bash
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-wheel-${{ matrix.os }}
+          path: dist/*.whl
+
+  publish:
+    name: Publish to PyPI
+    needs: [set-version, build-wheels]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/minigraf
+    permissions:
+      id-token: write
+
+    steps:
+      - name: Download all wheels
+        uses: actions/download-artifact@v4
+        with:
+          pattern: python-wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
