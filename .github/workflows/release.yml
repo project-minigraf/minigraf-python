@@ -34,12 +34,16 @@ jobs:
         include:
           - os: ubuntu-latest
             build_args: --release --manylinux manylinux_2_34 --out dist
+            rust_targets: ''
           - os: ubuntu-24.04-arm
             build_args: --release --manylinux manylinux_2_34 --out dist
+            rust_targets: ''
           - os: macos-14
             build_args: --release --target universal2-apple-darwin --out dist
+            rust_targets: x86_64-apple-darwin
           - os: windows-latest
             build_args: --release --out dist
+            rust_targets: ''
 
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +51,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-apple-darwin
+          targets: ${{ matrix.rust_targets }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
