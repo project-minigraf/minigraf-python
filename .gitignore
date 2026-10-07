@@ -4,3 +4,4 @@ dist/
 *.whl
 __pycache__/
 *.pyc
+minigraf/minigraf_ffi/
