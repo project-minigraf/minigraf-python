@@ -67,10 +67,25 @@ fn lock<T>(m: &Mutex<T>) -> Result<MutexGuard<'_, T>, MiniGrafError> {
     })
 }
 
-fn to_usize(n: u64, what: &str) -> Result<usize, MiniGrafError> {
-    usize::try_from(n).map_err(|_| {
+// Counts cross the FFI as signed integers: Kotlin's unsigned types cannot be
+// called from Java. A negative or oversized count is API-017.
+
+fn to_u64(n: i64, what: &str) -> Result<u64, MiniGrafError> {
+    u64::try_from(n).map_err(|_| {
+        minigraf::MinigrafError::invalid_argument(format!("{what} {n} is negative")).into()
+    })
+}
+
+fn to_usize(n: i64, what: &str) -> Result<usize, MiniGrafError> {
+    usize::try_from(to_u64(n, what)?).map_err(|_| {
         minigraf::MinigrafError::invalid_argument(format!("{what} {n} is too large")).into()
     })
+}
+
+/// A transaction counter or timestamp for the FFI. Both stay far below
+/// `i64::MAX` (a counter of one per transaction; Unix milliseconds).
+fn from_u64(n: u64) -> i64 {
+    i64::try_from(n).unwrap_or(i64::MAX)
 }
 
 fn parse_uuid(s: &str, what: &str) -> Result<minigraf::EntityId, minigraf::MinigrafError> {
@@ -99,20 +114,20 @@ pub struct OpenOptions {
     pub read_only: Option<bool>,
     /// Pages (4 KB each) in the page cache. Default 256.
     #[uniffi(default)]
-    pub page_cache_size: Option<u64>,
+    pub page_cache_size: Option<i64>,
     /// Open even when the filesystem cannot lock files. Default false.
     #[uniffi(default)]
     pub allow_unlocked: Option<bool>,
     /// WAL entries before an automatic checkpoint. Default 1000; the maximum
     /// value also suppresses the checkpoint on close.
     #[uniffi(default)]
-    pub wal_checkpoint_threshold: Option<u64>,
+    pub wal_checkpoint_threshold: Option<i64>,
     /// Facts a recursive rule may derive per iteration. Default 1,000,000.
     #[uniffi(default)]
-    pub max_derived_facts: Option<u64>,
+    pub max_derived_facts: Option<i64>,
     /// Rows a query may return. Default 1,000,000.
     #[uniffi(default)]
-    pub max_results: Option<u64>,
+    pub max_results: Option<i64>,
     /// WAL durability. Default `Full`.
     #[uniffi(default)]
     pub synchronous: Option<SyncMode>,
@@ -202,8 +217,8 @@ pub struct FactRecord {
     pub entity: String,
     pub attribute: String,
     pub value: MiniGrafValue,
-    pub tx_count: u64,
-    pub tx_id: u64,
+    pub tx_count: i64,
+    pub tx_id: i64,
     pub valid_from: i64,
     pub valid_to: i64,
     pub asserted: bool,
@@ -215,8 +230,8 @@ impl From<minigraf::FactRecord> for FactRecord {
             entity: r.entity.to_string(),
             attribute: r.attribute,
             value: r.value.into(),
-            tx_count: r.tx_count,
-            tx_id: r.tx_id,
+            tx_count: from_u64(r.tx_count),
+            tx_id: from_u64(r.tx_id),
             valid_from: r.valid_from,
             valid_to: r.valid_to,
             asserted: r.asserted,
@@ -226,12 +241,17 @@ impl From<minigraf::FactRecord> for FactRecord {
 
 impl FactRecord {
     fn to_core(&self) -> Result<minigraf::FactRecord, minigraf::MinigrafError> {
+        let count = |n: i64, what: &str| {
+            u64::try_from(n).map_err(|_| {
+                minigraf::MinigrafError::invalid_argument(format!("{what} {n} is negative"))
+            })
+        };
         Ok(minigraf::FactRecord {
             entity: parse_uuid(&self.entity, "entity")?,
             attribute: self.attribute.clone(),
             value: self.value.to_core()?,
-            tx_count: self.tx_count,
-            tx_id: self.tx_id,
+            tx_count: count(self.tx_count, "tx_count")?,
+            tx_id: count(self.tx_id, "tx_id")?,
             valid_from: self.valid_from,
             valid_to: self.valid_to,
             asserted: self.asserted,
@@ -263,15 +283,15 @@ pub struct FactFilter {
     pub entities: Option<Vec<String>>,
     /// Lowest `tx_count` kept (inclusive).
     #[uniffi(default)]
-    pub tx_from: Option<u64>,
+    pub tx_from: Option<i64>,
     /// Highest `tx_count` kept (inclusive).
     #[uniffi(default)]
-    pub tx_to: Option<u64>,
+    pub tx_to: Option<i64>,
     #[uniffi(default)]
     pub order: Option<FactOrder>,
     /// In `Tx` order, the most records held in memory at once.
     #[uniffi(default)]
-    pub window: Option<u64>,
+    pub window: Option<i64>,
 }
 
 impl FactFilter {
@@ -291,7 +311,9 @@ impl FactFilter {
             f = f.entities(ids);
         }
         if self.tx_from.is_some() || self.tx_to.is_some() {
-            f = f.tx_range(self.tx_from.unwrap_or(0)..=self.tx_to.unwrap_or(u64::MAX));
+            let lo = self.tx_from.map_or(Ok(0), |n| to_u64(n, "tx_from"))?;
+            let hi = self.tx_to.map_or(Ok(u64::MAX), |n| to_u64(n, "tx_to"))?;
+            f = f.tx_range(lo..=hi);
         }
         if let Some(order) = self.order {
             f = f.order(match order {
@@ -376,8 +398,8 @@ impl MiniGrafDb {
     }
 
     /// The transaction counter that `:as-of N` compares against.
-    pub fn current_tx_count(&self) -> Result<u64, MiniGrafError> {
-        Ok(lock(&self.inner)?.current_tx_count())
+    pub fn current_tx_count(&self) -> Result<i64, MiniGrafError> {
+        Ok(from_u64(lock(&self.inner)?.current_tx_count()))
     }
 
     pub fn checkpoint(&self) -> Result<(), MiniGrafError> {
@@ -411,12 +433,12 @@ impl MiniGrafCursor {
     /// The next batch of at most `max_rows` rows (0 counts as 1), as a JSON
     /// array of rows encoded like `execute()`'s `results`; `None` at the end
     /// or after `close()`. A batch is never empty.
-    pub fn next_batch(&self, max_rows: u32) -> Result<Option<String>, MiniGrafError> {
+    pub fn next_batch(&self, max_rows: i32) -> Result<Option<String>, MiniGrafError> {
         let mut guard = lock(&self.inner)?;
         let Some(cursor) = guard.as_mut() else {
             return Ok(None);
         };
-        match cursor.next_batch(to_usize(u64::from(max_rows), "max_rows")?)? {
+        match cursor.next_batch(to_usize(i64::from(max_rows), "max_rows")?)? {
             Some(batch) => Ok(Some(rows_to_json(batch.rows()))),
             None => {
                 *guard = None;
@@ -446,12 +468,12 @@ pub struct MiniGrafFactLog {
 impl MiniGrafFactLog {
     /// The next batch of at most `max_records` records (0 counts as 1);
     /// `None` at the end or after `close()`. A batch is never empty.
-    pub fn next_batch(&self, max_records: u32) -> Result<Option<Vec<FactRecord>>, MiniGrafError> {
+    pub fn next_batch(&self, max_records: i32) -> Result<Option<Vec<FactRecord>>, MiniGrafError> {
         let mut guard = lock(&self.inner)?;
         let Some(log) = guard.as_mut() else {
             return Ok(None);
         };
-        match log.next_batch(to_usize(u64::from(max_records), "max_records")?) {
+        match log.next_batch(to_usize(i64::from(max_records), "max_records")?) {
             Ok(Some(batch)) => Ok(Some(batch.into_iter().map(FactRecord::from).collect())),
             Ok(None) => {
                 *guard = None;
@@ -521,16 +543,19 @@ impl MiniGrafLogWriter {
     }
 
     /// Close the open transaction and raise the counter to `tx_count`.
-    pub fn advance_tx_count(&self, tx_count: u64) -> Result<(), MiniGrafError> {
+    pub fn advance_tx_count(&self, tx_count: i64) -> Result<(), MiniGrafError> {
+        let tx_count = to_u64(tx_count, "tx_count")?;
         let mut guard = lock(&self.inner)?;
         let writer = guard.as_mut().ok_or_else(writer_closed)?;
         Ok(writer.advance_tx_count(tx_count)?)
     }
 
     /// The highest `tx_count` appended or advanced to.
-    pub fn tx_count(&self) -> Result<u64, MiniGrafError> {
+    pub fn tx_count(&self) -> Result<i64, MiniGrafError> {
         let guard = lock(&self.inner)?;
-        Ok(guard.as_ref().ok_or_else(writer_closed)?.tx_count())
+        Ok(from_u64(
+            guard.as_ref().ok_or_else(writer_closed)?.tx_count(),
+        ))
     }
 
     /// Commit every record and rename the file into place. Later calls are
@@ -826,6 +851,20 @@ mod tests {
             ..FactFilter::default()
         };
         assert!(msg(err(filter.to_core())).starts_with("[API-017]"));
+    }
+
+    #[test]
+    fn negative_counts_are_api_017() {
+        let options = OpenOptions {
+            page_cache_size: Some(-1),
+            ..OpenOptions::default()
+        };
+        assert!(msg(err(options.to_core())).starts_with("[API-017]"));
+        let db = MiniGrafDb::open_in_memory().expect("open");
+        let cursor = db
+            .query("(query [:find ?e :where [?e :n _]])".into())
+            .expect("query");
+        assert!(msg(err(cursor.next_batch(-1))).starts_with("[API-017]"));
     }
 
     #[test]
