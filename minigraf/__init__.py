@@ -23,6 +23,10 @@ Value = MiniGrafValue
 #: ``valid_to`` of a fact that is valid forever.
 VALID_TIME_FOREVER = 2**63 - 1
 
+#: ``wal_checkpoint_threshold`` that never checkpoints: no automatic checkpoint
+#: and none when the handle closes. Call ``checkpoint()`` yourself.
+WAL_CHECKPOINT_NEVER = 2**63 - 1
+
 
 def open(
     path,
@@ -118,6 +122,7 @@ __all__ = [
     "OpenOptions",
     "SyncMode",
     "VALID_TIME_FOREVER",
+    "WAL_CHECKPOINT_NEVER",
     "Value",
     "open",
 ]

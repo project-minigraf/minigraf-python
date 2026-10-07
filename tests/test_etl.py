@@ -264,3 +264,16 @@ def test_log_writer_without_finish_leaves_no_file(tmp_path):
             w.append_batch(records)
             raise RuntimeError("abort the build")
     assert not os.path.exists(out) and not os.path.exists(out + ".partial")
+
+
+def test_wal_checkpoint_never_suppresses_the_close_checkpoint(tmp_path):
+    """#322: an embedder that schedules its own checkpoints can skip the one on close."""
+    path = str(tmp_path / "never.graph")
+    db = minigraf.open(path, wal_checkpoint_threshold=minigraf.WAL_CHECKPOINT_NEVER)
+    db.execute("(transact [[:a :n 1]])")
+    del db
+    assert os.path.exists(path + ".wal")
+
+    reopened = MiniGrafDb.open(path)
+    assert [r[1] for r in reopened.query(QUERY)] == [1]
+    assert reopened.current_tx_count() == 1

@@ -47,6 +47,10 @@ src = minigraf.open("app.graph", read_only=True, page_cache_size=4096)
 db = minigraf.MiniGrafDb.open_with_options("app.graph", minigraf.OpenOptions(max_results=10_000))
 ```
 
+`wal_checkpoint_threshold=minigraf.WAL_CHECKPOINT_NEVER` turns off automatic checkpoints
+and the checkpoint when the handle closes, for applications that call `checkpoint()` on
+their own schedule.
+
 ## Query cursors
 
 `db.query()` returns a cursor whose answer is fixed when it opens. Iterating gives
