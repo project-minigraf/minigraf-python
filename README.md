@@ -100,6 +100,21 @@ Every error is a `MiniGrafError` whose `msg` starts with its code, such as
 `append_batch` stops at the first rejected record and ends the message with
 `(batch index N)`; the records before it stay appended.
 
+## Benchmarks
+
+`bench/envelope.py` measures the FFI round trip for minigraf's performance envelope
+(minigraf#394): it runs the core harness's query shapes through `db.query(...)` and
+`next_batch(1000)` and prints wall-time p50/p99 and peak RSS next to the Rust numbers.
+Results are published in minigraf's `docs/BENCHMARKS.md`.
+
+```bash
+# In minigraf: build the fixtures and the report.
+cargo run --profile envelope --example perf_envelope -- --scales 1m --json envelope.json
+# Here, with the binding installed (maturin develop --release):
+python bench/envelope.py ../minigraf/target/perf-envelope/fixture-v1-1m.graph \
+    --report ../minigraf/envelope.json --scale 1m
+```
+
 ## Building from source
 
 Requires Rust stable toolchain and `maturin`.
