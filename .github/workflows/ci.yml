@@ -12,6 +12,11 @@ on:
         required: false
         type: string
         default: ''
+      version:
+        description: 'Version stamped into the wheels, PEP 440 (release.yml passes the release version)'
+        required: false
+        type: string
+        default: '0.0.0.dev0'
 
 jobs:
   test:
@@ -47,3 +52,46 @@ jobs:
           pip install pytest
           bash build.sh test
         shell: bash
+
+  # Builds the wheels as the release publishes them.
+  package:
+    name: Package
+    uses: ./.github/workflows/package.yml
+    with:
+      ref: ${{ inputs.ref }}
+      version: ${{ inputs.version || '0.0.0.dev0' }}
+
+  # Installs the built wheel into a new virtual environment, without PyPI, and
+  # runs the README quick start and the consumer contract.
+  consumer:
+    name: Consumer test (${{ matrix.os }})
+    needs: package
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-wheel-*
+          path: dist
+          merge-multiple: true
+      - name: Run consumer test
+        shell: bash
+        run: bash consumer-test/run.sh local dist ${{ inputs.version || '0.0.0.dev0' }}
+
+  readme-sync:
+    name: README quick start matches the consumer test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - run: python3 -I consumer-test/readme_sync.py README.md consumer-test/quickstart.py

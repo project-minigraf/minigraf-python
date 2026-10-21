@@ -80,6 +80,9 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
+      # The wheels are built and consumer-tested here at the release version;
+      # publish uploads exactly these files.
+      version: ${{ needs.prepare.outputs.semver }}
 
   tag:
     name: Push tag and update main
@@ -114,69 +117,9 @@ jobs:
           git push origin --delete "release/$TAG" \
             || echo "::warning::Could not delete branch release/$TAG"
 
-  build-wheels:
-    name: Build wheel (${{ matrix.os }})
-    needs: [prepare, tag]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            build_args: --release --manylinux manylinux_2_34 --out dist
-            rust_targets: ''
-          - os: ubuntu-24.04-arm
-            build_args: --release --manylinux manylinux_2_34 --out dist
-            rust_targets: ''
-          - os: macos-14
-            build_args: --release --target universal2-apple-darwin --out dist
-            rust_targets: x86_64-apple-darwin
-          - os: windows-latest
-            build_args: --release --out dist
-            rust_targets: ''
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.tag }}
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust_targets }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Install maturin
-        run: pip install "maturin>=1.5"
-
-      - name: Stamp version into pyproject.toml
-        shell: bash
-        run: |
-          TAG="${{ needs.prepare.outputs.tag }}"
-          VERSION="${TAG#v}"
-          python3 -c "
-          import re, pathlib
-          p = pathlib.Path('pyproject.toml')
-          p.write_text(re.sub(r'^version = .*', 'version = \"${VERSION}\"', p.read_text(), flags=re.MULTILINE))
-          "
-
-      - name: Build wheel
-        run: bash build.sh build ${{ matrix.build_args }}
-        shell: bash
-
-      - name: Upload wheel
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-wheel-${{ matrix.os }}
-          path: dist/*.whl
-
   publish:
     name: Publish to PyPI
-    needs: [prepare, build-wheels, tag]
+    needs: [prepare, test, tag]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -188,13 +131,29 @@ jobs:
       - name: Download all wheels
         uses: actions/download-artifact@v4
         with:
-          pattern: python-wheel-*
+          pattern: dist-wheel-*
           path: dist
           merge-multiple: true
+
+      - name: Check the tested wheels
+        run: |
+          ls -l dist
+          [ "$(ls dist/*.whl | wc -l)" -eq 4 ] || { echo "::error::expected 4 wheels"; exit 1; }
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
 
-
+  # Installs the published version from PyPI and runs the consumer test; on
+  # failure the run fails and a release-broken issue is opened.
+  verify-published:
+    name: Verify the published wheels
+    needs: [prepare, publish]
+    permissions:
+      contents: read
+      issues: write
+    uses: ./.github/workflows/verify-published.yml
+    with:
+      version: ${{ needs.prepare.outputs.semver }}
+      ref: ${{ needs.prepare.outputs.tag }}
