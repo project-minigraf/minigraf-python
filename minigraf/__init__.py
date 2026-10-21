@@ -38,12 +38,14 @@ def open(
     max_derived_facts=None,
     max_results=None,
     synchronous=None,
+    query_memory_limit=None,
 ):
     """Open a file-backed database. An option left as ``None`` keeps its default.
 
     ``minigraf.open("app.graph", read_only=True)`` opens the file read-only:
     any number of read-only handles can share it, and writes raise
-    ``MiniGrafError`` with code API-014.
+    ``MiniGrafError`` with code API-014. ``query_memory_limit`` caps the bytes
+    one query may hold; a query that would hold more raises QRY-012.
     """
     return MiniGrafDb.open_with_options(
         path,
@@ -55,6 +57,7 @@ def open(
             max_derived_facts=max_derived_facts,
             max_results=max_results,
             synchronous=synchronous,
+            query_memory_limit=query_memory_limit,
         ),
     )
 

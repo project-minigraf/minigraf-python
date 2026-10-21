@@ -43,9 +43,16 @@ import minigraf
 src = minigraf.open("app.graph", read_only=True, page_cache_size=4096)
 
 # Every option: read_only, page_cache_size, allow_unlocked, wal_checkpoint_threshold,
-# max_derived_facts, max_results, synchronous (minigraf.SyncMode.FULL / NORMAL).
-db = minigraf.MiniGrafDb.open_with_options("app.graph", minigraf.OpenOptions(max_results=10_000))
+# max_derived_facts, max_results, synchronous (minigraf.SyncMode.FULL / NORMAL),
+# query_memory_limit.
+db = minigraf.MiniGrafDb.open_with_options("app.graph", minigraf.OpenOptions(max_derived_facts=10_000))
 ```
+
+`query_memory_limit` is the most bytes one query may hold, counted per entry by the
+operators that keep state (join build sides, negation and `or` tables, distinct sets,
+aggregate groups, window rows, rule-derived facts). A query that would hold more raises
+`MiniGrafError` with QRY-012 and frees what it held. The default, and `2**63 - 1`, is no
+limit. Rows a cursor returns are not counted, so read a large answer with `db.query()`.
 
 `wal_checkpoint_threshold=minigraf.WAL_CHECKPOINT_NEVER` turns off automatic checkpoints
 and the checkpoint when the handle closes, for applications that call `checkpoint()` on
