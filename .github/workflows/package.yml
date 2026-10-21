@@ -1,0 +1,99 @@
+name: Package
+
+# Builds the wheels exactly as the release publishes them, stamped with
+# `version` (PEP 440), and uploads each as dist-wheel-<os>. Linux wheels are
+# manylinux_2_34. (`--zig --compatibility manylinux2014` would lower the floor
+# to glibc 2.17, but maturin then builds a wheel with no Python bindings and no
+# error; see the glibc-floor issue.)
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: false
+        type: string
+        default: ''
+      version:
+        required: true
+        type: string
+
+jobs:
+  wheel:
+    name: Build wheel (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build_args: --release --manylinux manylinux_2_34 --out dist
+            rust_targets: ''
+          - os: ubuntu-24.04-arm
+            build_args: --release --manylinux manylinux_2_34 --out dist
+            rust_targets: ''
+          - os: macos-14
+            build_args: --release --target universal2-apple-darwin --out dist
+            rust_targets: x86_64-apple-darwin
+          - os: windows-latest
+            build_args: --release --out dist
+            rust_targets: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install maturin
+        run: pip install "maturin>=1.5"
+
+      - name: Stamp version into pyproject.toml
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 -c "
+          import os, re, pathlib
+          p = pathlib.Path('pyproject.toml')
+          p.write_text(re.sub(r'^version = .*', 'version = \"%s\"' % os.environ['VERSION'], p.read_text(), flags=re.MULTILINE))
+          "
+          grep '^version' pyproject.toml
+
+      - name: Build wheel
+        shell: bash
+        run: bash build.sh build ${{ matrix.build_args }}
+
+      - name: Check the wheel
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          ls -l dist
+          WHEEL=$(ls dist/*.whl)
+          [ "$(echo "$WHEEL" | wc -l)" -eq 1 ] || { echo "::error::expected one wheel"; exit 1; }
+          case "$(basename "$WHEEL")" in
+            "minigraf-$VERSION-"*) ;;
+            *) echo "::error::$(basename "$WHEEL") is not version $VERSION"; exit 1 ;;
+          esac
+          # Both the generated bindings and the native library: maturin can
+          # build a wheel without the bindings and report success.
+          FILES=$(python3 -m zipfile -l "$WHEEL" | awk '{print $1}')
+          echo "$FILES"
+          grep -qx 'minigraf/minigraf_ffi/minigraf_ffi.py' <<<"$FILES" \
+            || { echo "::error::the wheel has no generated bindings (minigraf_ffi.py)"; exit 1; }
+          grep -qE '^minigraf/minigraf_ffi/(lib)?minigraf_ffi\.(so|dylib|dll)$' <<<"$FILES" \
+            || { echo "::error::the wheel has no native library"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-wheel-${{ matrix.os }}
+          path: dist/*.whl
+          if-no-files-found: error
