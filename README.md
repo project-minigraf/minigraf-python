@@ -94,6 +94,13 @@ other Python type raises `TypeError`. A missing slot raises `MiniGrafError.Api` 
 `[API-022]`, a slot in an attribute position `[API-023]`, and a value of the wrong kind
 for its slot `[API-024]`.
 
+A `set` or `frozenset` binds a set value, for `in?` and the other set predicates or a
+set-valued attribute: `pq.execute(ids={1, 2, 3})`. Its elements are `bool`, `int`, `float`,
+`str`, `None` or `uuid.UUID` (a ref). `minigraf.Value` is not hashable, so a set with keyword
+elements is written `minigraf.Value.SET([minigraf.Value.KEYWORD(":role/admin")])`. A set
+inside a set raises `MiniGrafError.Api` with `[API-021]`; a `list` is not a set. Set values
+come back as JSON arrays from `execute()` and as `Value.SET([...])` in fact records.
+
 ## Fact log and log writer
 
 `db.fact_log(filter)` streams every fact version (assertions and retractions, with

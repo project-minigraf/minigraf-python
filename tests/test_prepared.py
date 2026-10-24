@@ -147,3 +147,46 @@ def test_prepared_query_sees_later_writes(db):
     assert rows(pq.execute(n=4)) == []
     db.execute("(transact [[:d :n 4]])")
     assert len(rows(pq.execute(n=4))) == 1
+
+
+# ─── Sets (#316) ─────────────────────────────────────────────────────────────
+
+
+def test_python_sets_bind_set_values(db):
+    member = db.prepare("(query [:find ?e :where [?e :n ?n] [(in? ?n $s)]])")
+    assert len(rows(member.execute(s={1, 3}))) == 2
+    assert len(rows(member.execute(s=frozenset([2])))) == 1
+    assert rows(member.execute(s=set())) == []
+    typed = Value.SET([Value.INT64(1), Value.INT64(1)])
+    assert len(rows(member.execute(s=typed))) == 1
+
+
+def test_set_values_come_back_typed_and_as_arrays(db):
+    db.execute('(transact [[:a :tags #{1 :k "x"}]])')
+    equal = db.prepare("(query [:find ?x :where [?e :tags $s] [?e :n ?x]])")
+    tags = Value.SET([Value.INT64(1), Value.TEXT("x"), Value.KEYWORD(":k")])
+    assert rows(equal.execute(s=tags)) == [[1]]
+    # A string is no keyword.
+    assert rows(equal.execute(s={1, "x", ":k"})) == []
+    out = db.prepare("(query [:find ?t :where [:a :tags ?t]])")
+    assert rows(out.execute()) == [["x", 1, ":k"]]
+    records = [r for r in db.fact_log(minigraf.FactFilter(attributes=[":tags"]))]
+    assert records[0].value == Value.SET(
+        [Value.TEXT("x"), Value.INT64(1), Value.KEYWORD(":k")]
+    )
+
+
+def test_set_element_forms(db):
+    pq = db.prepare("(query [:find ?x :where [$e :n ?x] [(in? $e $s)]])")
+    # A UUID element is a ref.
+    hit = {uuid.UUID(A)}
+    assert rows(pq.execute(e=minigraf.Entity(A), s=hit)) == [[1]]
+    with pytest.raises(MiniGrafError.Api, match=r"^\[API-021\]"):
+        pq.execute(e=minigraf.Entity(A), s={frozenset([1])})
+    with pytest.raises(MiniGrafError.Api, match=r"^\[API-021\]"):
+        pq.execute(e=minigraf.Entity(A), s=Value.SET([Value.SET([])]))
+    with pytest.raises(TypeError):
+        pq.execute(e=minigraf.Entity(A), s={(1, 2)})
+    # A list is not a set.
+    with pytest.raises(TypeError):
+        pq.execute(e=minigraf.Entity(A), s=[1])
