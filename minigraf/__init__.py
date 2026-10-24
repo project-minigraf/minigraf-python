@@ -1,4 +1,5 @@
 import json as _json
+import uuid as _uuid
 
 from .minigraf_ffi import (
     FactFilter,
@@ -8,7 +9,9 @@ from .minigraf_ffi import (
     MiniGrafDb,
     MiniGrafError,
     MiniGrafFactLog,
+    MiniGrafBindValue,
     MiniGrafLogWriter,
+    MiniGrafPreparedQuery,
     MiniGrafValue,
     OpenOptions,
     SyncMode,
@@ -19,6 +22,8 @@ Cursor = MiniGrafCursor
 FactLog = MiniGrafFactLog
 LogWriter = MiniGrafLogWriter
 Value = MiniGrafValue
+BindValue = MiniGrafBindValue
+PreparedQuery = MiniGrafPreparedQuery
 
 #: ``valid_to`` of a fact that is valid forever.
 VALID_TIME_FOREVER = 2**63 - 1
@@ -60,6 +65,87 @@ def open(
             query_memory_limit=query_memory_limit,
         ),
     )
+
+
+# ─── Bind values for prepared queries (#181) ─────────────────────────────────
+
+
+def Entity(entity):
+    """Bind an entity (a UUID or its string). It also fits a value slot as a ref."""
+    return MiniGrafBindValue.ENTITY(str(entity))
+
+
+def TxCount(n):
+    """Bind ``:as-of $slot`` to the transaction counter ``n``."""
+    return MiniGrafBindValue.TX_COUNT(n)
+
+
+def Timestamp(ms):
+    """Bind ``:as-of $slot`` or ``:valid-at $slot`` to Unix milliseconds."""
+    return MiniGrafBindValue.TIMESTAMP(ms)
+
+
+#: Bind ``:valid-at $slot`` to every valid time, like ``:any-valid-time``.
+ANY_VALID_TIME = MiniGrafBindValue.ANY_VALID_TIME()
+
+_I64_MIN, _I64_MAX = -(2**63), 2**63 - 1
+
+
+def _bind_value(name, v):
+    """A plain Python value or a typed form as a ``MiniGrafBindValue``."""
+    if isinstance(v, MiniGrafBindValue):
+        return v
+    if isinstance(v, MiniGrafValue):
+        return MiniGrafBindValue.VALUE(v)
+    # bool before int: True is an int in Python.
+    if isinstance(v, bool):
+        return MiniGrafBindValue.VALUE(MiniGrafValue.BOOL(v))
+    if isinstance(v, int):
+        if not _I64_MIN <= v <= _I64_MAX:
+            raise MiniGrafError.Api(
+                f"[API-017] invalid argument: slot ${name}: {v} is outside the 64-bit integer range"
+            )
+        return MiniGrafBindValue.VALUE(MiniGrafValue.INT64(v))
+    if isinstance(v, float):
+        return MiniGrafBindValue.VALUE(MiniGrafValue.FLOAT64(v))
+    if isinstance(v, str):
+        return MiniGrafBindValue.VALUE(MiniGrafValue.TEXT(v))
+    if v is None:
+        return MiniGrafBindValue.VALUE(MiniGrafValue.NULL())
+    if isinstance(v, _uuid.UUID):
+        return MiniGrafBindValue.ENTITY(str(v))
+    raise TypeError(
+        f"slot ${name}: cannot bind a {type(v).__name__}; use bool, int, float, str, "
+        "None, uuid.UUID, a minigraf.Value or minigraf.Entity/TxCount/Timestamp/ANY_VALID_TIME"
+    )
+
+
+def _bindings(mapping, kwargs):
+    merged = dict(mapping or {})
+    merged.update(kwargs)
+    return {name: _bind_value(name, v) for name, v in merged.items()}
+
+
+_prepared_execute = MiniGrafPreparedQuery.execute
+_prepared_query = MiniGrafPreparedQuery.query
+
+
+def _execute(self, bindings=None, /, **kwargs):
+    """Run the query with its slots bound, from a dict and/or keyword
+    arguments named without the ``$``; returns JSON like ``MiniGrafDb.execute``.
+    Plain ``bool``, ``int``, ``float``, ``str``, ``None`` and ``uuid.UUID``
+    values bind as they are."""
+    return _prepared_execute(self, _bindings(bindings, kwargs))
+
+
+def _query(self, bindings=None, /, **kwargs):
+    """Run the query with its slots bound, as ``execute`` does, and return a
+    cursor over its rows."""
+    return _prepared_query(self, _bindings(bindings, kwargs))
+
+
+MiniGrafPreparedQuery.execute = _execute
+MiniGrafPreparedQuery.query = _query
 
 
 def _close_on_exit(self, *exc):
@@ -110,7 +196,10 @@ MiniGrafLogWriter.__enter__ = _enter
 MiniGrafLogWriter.__exit__ = _writer_exit
 
 __all__ = [
+    "ANY_VALID_TIME",
+    "BindValue",
     "Cursor",
+    "Entity",
     "FactFilter",
     "FactLog",
     "FactOrder",
@@ -120,10 +209,15 @@ __all__ = [
     "MiniGrafDb",
     "MiniGrafError",
     "MiniGrafFactLog",
+    "MiniGrafBindValue",
     "MiniGrafLogWriter",
+    "MiniGrafPreparedQuery",
     "MiniGrafValue",
     "OpenOptions",
+    "PreparedQuery",
     "SyncMode",
+    "Timestamp",
+    "TxCount",
     "VALID_TIME_FOREVER",
     "WAL_CHECKPOINT_NEVER",
     "Value",

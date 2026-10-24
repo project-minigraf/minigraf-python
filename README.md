@@ -71,6 +71,29 @@ with db.query("(query [:find ?n :where [?e :name ?n]])") as cursor:
         print(row)
 ```
 
+## Prepared queries
+
+`db.prepare()` parses a query once; `execute()` and `query()` run it with its `$slots`
+bound, from keyword arguments or a dict (names without the `$`). Each run reads the
+database as it is then. A prepared query keeps its database open until both are freed.
+
+```python
+pq = db.prepare("(query [:find ?n :where [?e :age $age] [?e :name ?n]])")
+print(json.loads(pq.execute(age=30))["results"])
+print(json.loads(pq.execute({"age": 40}))["results"])
+with pq.query(age=30) as cursor:
+    for row in cursor:
+        print(row)
+```
+
+`bool`, `int`, `float`, `str` and `None` bind as values, and a `uuid.UUID` as an entity
+(it also fits a value slot as a ref). For the other kinds use `minigraf.Value.KEYWORD(":k")`,
+`minigraf.Value.REF(uuid_str)`, `minigraf.Entity(uuid)`, `minigraf.TxCount(n)` or
+`minigraf.Timestamp(ms)` for `:as-of`, and `minigraf.ANY_VALID_TIME` for `:valid-at`. Any
+other Python type raises `TypeError`. A missing slot raises `MiniGrafError.Api` with
+`[API-022]`, a slot in an attribute position `[API-023]`, and a value of the wrong kind
+for its slot `[API-024]`.
+
 ## Fact log and log writer
 
 `db.fact_log(filter)` streams every fact version (assertions and retractions, with
@@ -103,7 +126,8 @@ with src.fact_log(FactFilter()) as log, LogWriter.create("new.graph", OpenOption
 ## Errors
 
 Every error is a `MiniGrafError` whose `msg` starts with its code, such as
-`[API-015]`. See the [error reference](https://github.com/project-minigraf/minigraf/blob/main/docs/ERROR_REFERENCE.md).
+`[API-015]`. Its class follows the code's category: `MiniGrafError.Parse`, `.Query`,
+`.Storage`, `.Api` (a bad argument, a closed object, a bind mistake) or `.Other`. See the [error reference](https://github.com/project-minigraf/minigraf/blob/main/docs/ERROR_REFERENCE.md).
 `append_batch` stops at the first rejected record and ends the message with
 `(batch index N)`; the records before it stay appended.
 
