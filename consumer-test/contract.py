@@ -8,7 +8,7 @@ import json
 import os
 import sys
 
-from minigraf import MiniGrafDb, MiniGrafError
+from minigraf import MiniGrafDb, MiniGrafError, Value
 
 QUERY = "(query [:find ?n :where [?e :name ?n]])"
 
@@ -21,6 +21,15 @@ mem = MiniGrafDb.open_in_memory()
 mem.execute('(transact [[:alice :name "Alice"]])')
 assert names(mem) == ["Alice"], "query in memory returns Alice"
 print("ok: in memory")
+
+mem.execute('(transact [[:bob :name "Bob"]])')
+prepared = mem.prepare("(query [:find ?e :where [?e :name $name]])")
+for name in ("Alice", "Bob"):
+    found = json.loads(prepared.execute(name=name))["results"]
+    assert len(found) == 1, f"prepared query finds {name}"
+typed = json.loads(prepared.execute(name=Value.TEXT("Alice")))["results"]
+assert len(typed) == 1, "prepared query takes a typed value"
+print("ok: prepared query runs with plain and typed bind values")
 
 try:
     mem.execute("(query [:find")
