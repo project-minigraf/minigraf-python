@@ -31,6 +31,13 @@ typed = json.loads(prepared.execute(name=Value.TEXT("Alice")))["results"]
 assert typed == [["Alice"]], "prepared query takes a typed value"
 print("ok: prepared query runs with plain and typed bind values")
 
+mem.execute('(transact [[:alice :tags #{1 "x"}]])')
+tags = json.loads(mem.execute("(query [:find ?t :where [?e :tags ?t]])"))["results"]
+assert tags == [[["x", 1]]], "a set value comes back as an array"
+member = mem.prepare("(query [:find ?t :where [?e :tags ?t] [(in? 1 $s)]])")
+assert json.loads(member.execute(s={1, 2}))["results"] == [[["x", 1]]], "a set binds"
+print("ok: set values come back and bind")
+
 try:
     mem.execute("(query [:find")
 except MiniGrafError:

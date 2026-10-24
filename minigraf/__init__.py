@@ -91,32 +91,58 @@ ANY_VALID_TIME = MiniGrafBindValue.ANY_VALID_TIME()
 _I64_MIN, _I64_MAX = -(2**63), 2**63 - 1
 
 
-def _bind_value(name, v):
-    """A plain Python value or a typed form as a ``MiniGrafBindValue``."""
-    if isinstance(v, MiniGrafBindValue):
-        return v
+def _plain_value(name, v):
+    """A plain Python value as a ``MiniGrafValue``, or ``None`` if it is none."""
     if isinstance(v, MiniGrafValue):
-        return MiniGrafBindValue.VALUE(v)
+        return v
     # bool before int: True is an int in Python.
     if isinstance(v, bool):
-        return MiniGrafBindValue.VALUE(MiniGrafValue.BOOL(v))
+        return MiniGrafValue.BOOL(v)
     if isinstance(v, int):
         if not _I64_MIN <= v <= _I64_MAX:
             raise MiniGrafError.Api(
                 f"[API-017] invalid argument: slot ${name}: {v} is outside the 64-bit integer range"
             )
-        return MiniGrafBindValue.VALUE(MiniGrafValue.INT64(v))
+        return MiniGrafValue.INT64(v)
     if isinstance(v, float):
-        return MiniGrafBindValue.VALUE(MiniGrafValue.FLOAT64(v))
+        return MiniGrafValue.FLOAT64(v)
     if isinstance(v, str):
-        return MiniGrafBindValue.VALUE(MiniGrafValue.TEXT(v))
+        return MiniGrafValue.TEXT(v)
     if v is None:
-        return MiniGrafBindValue.VALUE(MiniGrafValue.NULL())
+        return MiniGrafValue.NULL()
+    if isinstance(v, (set, frozenset)):
+        return MiniGrafValue.SET([_set_element(name, e) for e in v])
+    return None
+
+
+def _set_element(name, e):
+    """An element of a Python set as a ``MiniGrafValue``. A UUID is a ref.
+    ``minigraf.Value`` is not hashable, so keyword elements need
+    ``Value.SET([...])``."""
+    value = _plain_value(name, e)
+    if value is not None:
+        return value
+    if isinstance(e, _uuid.UUID):
+        return MiniGrafValue.REF(str(e))
+    raise TypeError(
+        f"slot ${name}: cannot put a {type(e).__name__} in a set; use bool, int, float, "
+        "str, None, uuid.UUID, or Value.SET([...]) for keywords"
+    )
+
+
+def _bind_value(name, v):
+    """A plain Python value or a typed form as a ``MiniGrafBindValue``."""
+    if isinstance(v, MiniGrafBindValue):
+        return v
+    value = _plain_value(name, v)
+    if value is not None:
+        return MiniGrafBindValue.VALUE(value)
     if isinstance(v, _uuid.UUID):
         return MiniGrafBindValue.ENTITY(str(v))
     raise TypeError(
         f"slot ${name}: cannot bind a {type(v).__name__}; use bool, int, float, str, "
-        "None, uuid.UUID, a minigraf.Value or minigraf.Entity/TxCount/Timestamp/ANY_VALID_TIME"
+        "None, set, frozenset, uuid.UUID, a minigraf.Value or "
+        "minigraf.Entity/TxCount/Timestamp/ANY_VALID_TIME"
     )
 
 
