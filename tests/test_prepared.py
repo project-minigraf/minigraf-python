@@ -59,6 +59,13 @@ def test_uuid_binds_an_entity_anywhere(db):
     entity_slot = db.prepare("(query [:find ?x :where [$e :n ?x]])")
     assert rows(entity_slot.execute(e=uuid.UUID(A))) == [[1]]
 
+    db.execute(f'(transact [[:b :friend #uuid "{A}"]])')
+    db.execute("(rule [(friend-of ?x ?f) [?x :friend ?f]])")
+    value_slot = db.prepare("(query [:find ?x :where [?x :friend $f]])")
+    rule_arg = db.prepare("(query [:find ?x :where (friend-of ?x $f)])")
+    for pq in (value_slot, rule_arg):
+        assert len(rows(pq.execute(f=uuid.UUID(A)))) == 1
+
 
 @pytest.mark.parametrize(
     "query, value",
