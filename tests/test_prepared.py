@@ -169,7 +169,7 @@ def test_set_values_come_back_typed_and_as_arrays(db):
     # A string is no keyword.
     assert rows(equal.execute(s={1, "x", ":k"})) == []
     out = db.prepare("(query [:find ?t :where [:a :tags ?t]])")
-    assert rows(out.execute()) == [["x", 1, ":k"]]
+    assert rows(out.execute()) == [[["x", 1, ":k"]]]
     records = [r for r in db.fact_log(minigraf.FactFilter(attributes=[":tags"]))]
     assert records[0].value == Value.SET(
         [Value.TEXT("x"), Value.INT64(1), Value.KEYWORD(":k")]
@@ -181,10 +181,12 @@ def test_set_element_forms(db):
     # A UUID element is a ref.
     hit = {uuid.UUID(A)}
     assert rows(pq.execute(e=minigraf.Entity(A), s=hit)) == [[1]]
-    with pytest.raises(MiniGrafError.Api, match=r"^\[API-021\]"):
+    with pytest.raises(MiniGrafError.Api) as e:
         pq.execute(e=minigraf.Entity(A), s={frozenset([1])})
-    with pytest.raises(MiniGrafError.Api, match=r"^\[API-021\]"):
+    assert code(e) == "[API-021]"
+    with pytest.raises(MiniGrafError.Api) as e:
         pq.execute(e=minigraf.Entity(A), s=Value.SET([Value.SET([])]))
+    assert code(e) == "[API-021]"
     with pytest.raises(TypeError):
         pq.execute(e=minigraf.Entity(A), s={(1, 2)})
     # A list is not a set.
