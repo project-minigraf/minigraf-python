@@ -26,10 +26,10 @@ def rows(result):
 
 
 def test_prepared_query_runs_again_with_new_bindings(db):
-    pq = db.prepare("(query [:find ?e :where [?e :n $n]])")
+    pq = db.prepare("(query [:find ?x :where [?e :n $n] [?e :n ?x]])")
     for n in (1, 2, 3):
-        assert len(rows(pq.execute(n=n))) == 1
-        assert len(rows(pq.execute({"n": n}))) == 1
+        assert rows(pq.execute(n=n)) == [[n]]
+        assert rows(pq.execute({"n": n})) == [[n]]
     assert rows(pq.execute(n=9)) == []
 
 

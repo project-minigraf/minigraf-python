@@ -23,12 +23,12 @@ assert names(mem) == ["Alice"], "query in memory returns Alice"
 print("ok: in memory")
 
 mem.execute('(transact [[:bob :name "Bob"]])')
-prepared = mem.prepare("(query [:find ?e :where [?e :name $name]])")
+prepared = mem.prepare("(query [:find ?n :where [?e :name $name] [?e :name ?n]])")
 for name in ("Alice", "Bob"):
     found = json.loads(prepared.execute(name=name))["results"]
-    assert len(found) == 1, f"prepared query finds {name}"
+    assert found == [[name]], f"prepared query finds {name}"
 typed = json.loads(prepared.execute(name=Value.TEXT("Alice")))["results"]
-assert len(typed) == 1, "prepared query takes a typed value"
+assert typed == [["Alice"]], "prepared query takes a typed value"
 print("ok: prepared query runs with plain and typed bind values")
 
 try:
