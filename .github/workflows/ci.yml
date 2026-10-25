@@ -40,6 +40,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      # The shim's own Rust tests (UDF adapters, handle locks), copied from
+      # minigraf-binding-template.
+      - name: Rust tests
+        run: cargo test
+
       - name: Install maturin
         run: pip install "maturin>=1.5"
 

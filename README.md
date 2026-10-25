@@ -101,6 +101,63 @@ elements is written `minigraf.Value.SET([minigraf.Value.KEYWORD(":role/admin")])
 inside a set raises `MiniGrafError.Api` with `[API-021]`; a `list` is not a set. Set values
 come back as JSON arrays from `execute()` and as `Value.SET([...])` in fact records.
 
+## User functions
+
+A predicate subclasses `minigraf.Predicate` and is called in Datalog as `[(name ?v)]`.
+An aggregate subclasses `minigraf.Aggregate`; its `accumulator()` returns a new
+`minigraf.Accumulator` (`step(value)`, `finish(count)`) for each group or window
+partition, and it is used as `(name ?v)` in `:find` or with `:over`. Values arrive as
+`minigraf.Value` (`Value.INT64`, `Value.TEXT`, …, with the value in `.value`), and
+`finish` returns one.
+
+```python
+from minigraf import Accumulator, Aggregate, Predicate, UdfError, Value
+
+class Adult(Predicate):
+    def test(self, value):
+        if not isinstance(value, Value.INT64):
+            raise UdfError.Failed("age is not an integer")
+        return value.value >= 18
+
+class Product(Aggregate):
+    def accumulator(self):
+        return ProductAcc()
+
+class ProductAcc(Accumulator):
+    def __init__(self):
+        self.product = 1
+    def step(self, value):
+        self.product *= value.value
+    def finish(self, count):  # count: values stepped
+        return Value.INT64(self.product)
+
+db.register_predicate("adult?", Adult())
+db.register_aggregate("product", Product())
+db.execute("(query [:find ?n :where [?e :age ?a] [(adult? ?a)] [?e :name ?n]])")
+db.execute("(query [:find ?g (product ?a) :where [?e :group ?g] [?e :age ?a]])")
+db.execute("(query [:find ?a (product ?a :over (:order-by ?a)) :where [?e :age ?a]])")
+```
+
+- **Failures.** A callback that raises stops the query with `QRY-014`, raised as
+  `MiniGrafError.Query`; it is never read as `False` or a missing value. Raise
+  `UdfError.Failed(msg)` to choose the message. Any other exception also fails the call,
+  with its `repr` (such as `ValueError('bad')`) as the message. A `Value.REF` from
+  `finish` whose value is not a UUID is a failing call too.
+- **Lifecycle.** The database keeps a strong reference to each registered object until
+  the database and every cursor and prepared query opened from it are freed. There is
+  no unregister. Predicates and aggregates have separate names, and registering a name
+  twice in either is an error (`INT-040`). A query sees the functions registered when it
+  opened.
+- **Threading.** A callback runs on the thread that calls `execute` (of the database or
+  a prepared query) or a cursor's `next_batch`, including a prepared query's cursor.
+  The binding releases the GIL while the core runs and the callback re-acquires it, so
+  queries on different threads may call the same object at once; it must be thread-safe.
+  One accumulator is used by one query on one thread at a time.
+- **Cost.** Each call crosses the FFI once: one Python call per value.
+- **Re-entry.** A callback may query the same database, open a cursor or register another
+  function. Inside a write transaction, the calls the core refuses there still return
+  `INT-001`.
+
 ## Fact log and log writer
 
 `db.fact_log(filter)` streams every fact version (assertions and retractions, with
