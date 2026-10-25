@@ -94,8 +94,7 @@ def test_any_exception_fails_the_query_with_qry_014(db):
     db.register_predicate("broken?", Broken())
     with pytest.raises(MiniGrafError.Query) as e:
         db.execute("(query [:find ?n :where [?e :n ?n] [(broken? ?n)]])")
-    assert e.value.msg.startswith("[QRY-014]")
-    assert "own exception" in e.value.msg
+    assert e.value.msg == "[QRY-014] user function `broken?` failed: ValueError('own exception')"
 
 
 def test_aggregate_step_error_is_qry_014(db):
@@ -136,11 +135,59 @@ def test_predicate_may_query_the_same_database(db):
     assert rows(db.execute("(query [:find ?n :where [?e :n ?n] [(g2? ?n)]])")) == [[3], [4]]
 
 
+def test_cursors_and_prepared_queries_call_user_functions(db):
+    db.register_predicate("even?", IsEven())
+    db.register_aggregate("total", Total())
+    with db.query("(query [:find ?n :where [?e :n ?n] [(even? ?n)]])") as cursor:
+        assert sorted(cursor) == [[2], [4]]
+    pq = db.prepare("(query [:find (total ?n) :where [?e :g $g] [?e :n ?n]])")
+    assert rows(pq.execute(g=1)) == [[3]]
+    with pq.query(g=2) as cursor:
+        assert list(cursor) == [[7]]
+
+
+def test_a_user_function_failure_in_a_cursor_is_qry_014(db):
+    db.register_aggregate("total", Total(fail_on=2))
+    with pytest.raises(MiniGrafError.Query) as e:
+        with db.query("(query [:find (total ?n) :where [?e :n ?n]])") as cursor:
+            list(cursor)
+    assert e.value.msg.startswith("[QRY-014]")
+
+
 def test_a_name_registers_once(db):
     db.register_predicate("even?", IsEven())
     with pytest.raises(MiniGrafError) as e:
         db.register_predicate("even?", IsEven())
     assert e.value.msg.startswith("[INT-040]")
+
+
+def test_two_queries_are_in_one_predicate_at_once(db):
+    # Each call waits until a call from the other thread arrives: this only
+    # finishes if neither query holds the GIL or a binding lock while the
+    # core runs.
+    barrier = threading.Barrier(2, timeout=10)
+
+    class Meet(Predicate):
+        def test(self, value):
+            barrier.wait()
+            return True
+
+    db.register_predicate("meet?", Meet())
+    results, errors = [], []
+
+    def run():
+        try:
+            results.append(rows(db.execute("(query [:find ?n :where [:a :n ?n] [(meet? ?n)]])")))
+        except Exception as e:
+            errors.append(e)
+
+    threads = [threading.Thread(target=run) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert results == [[[1]], [[1]]]
 
 
 def test_two_threads_share_one_predicate(db):
