@@ -5,13 +5,17 @@ from .minigraf_ffi import (
     FactFilter,
     FactOrder,
     FactRecord,
+    MiniGrafAccumulator,
+    MiniGrafAggregate,
     MiniGrafCursor,
     MiniGrafDb,
     MiniGrafError,
     MiniGrafFactLog,
     MiniGrafBindValue,
     MiniGrafLogWriter,
+    MiniGrafPredicate,
     MiniGrafPreparedQuery,
+    MiniGrafUdfError,
     MiniGrafValue,
     OpenOptions,
     SyncMode,
@@ -24,6 +28,10 @@ LogWriter = MiniGrafLogWriter
 Value = MiniGrafValue
 BindValue = MiniGrafBindValue
 PreparedQuery = MiniGrafPreparedQuery
+Predicate = MiniGrafPredicate
+Aggregate = MiniGrafAggregate
+Accumulator = MiniGrafAccumulator
+UdfError = MiniGrafUdfError
 
 #: ``valid_to`` of a fact that is valid forever.
 VALID_TIME_FOREVER = 2**63 - 1
@@ -223,6 +231,8 @@ MiniGrafLogWriter.__exit__ = _writer_exit
 
 __all__ = [
     "ANY_VALID_TIME",
+    "Accumulator",
+    "Aggregate",
     "BindValue",
     "Cursor",
     "Entity",
@@ -231,19 +241,25 @@ __all__ = [
     "FactOrder",
     "FactRecord",
     "LogWriter",
+    "MiniGrafAccumulator",
+    "MiniGrafAggregate",
     "MiniGrafCursor",
     "MiniGrafDb",
     "MiniGrafError",
     "MiniGrafFactLog",
     "MiniGrafBindValue",
     "MiniGrafLogWriter",
+    "MiniGrafPredicate",
     "MiniGrafPreparedQuery",
+    "MiniGrafUdfError",
     "MiniGrafValue",
     "OpenOptions",
+    "Predicate",
     "PreparedQuery",
     "SyncMode",
     "Timestamp",
     "TxCount",
+    "UdfError",
     "VALID_TIME_FOREVER",
     "WAL_CHECKPOINT_NEVER",
     "Value",
