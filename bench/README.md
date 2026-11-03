@@ -4,7 +4,12 @@ Run from this worktree after building the local binding. No released package
 is loaded as a fallback. Build on Linux:
 
 ```sh
-CARGO_TARGET_DIR="$PWD/target/p16" maturin develop --release (inside a virtualenv; cargo build --bin uniffi-bindgen first)
+python3 -m venv target/bench-venv
+source target/bench-venv/bin/activate
+pip install "maturin>=1.5,<2"
+export CARGO_TARGET_DIR="$PWD/target/p16"
+cargo build --bin uniffi-bindgen
+maturin develop --release
 target/bench-venv/bin/python bench/nightly.py --test
 ```
 
