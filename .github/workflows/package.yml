@@ -31,7 +31,7 @@ jobs:
           - os: ubuntu-24.04-arm
             build_args: --release --manylinux manylinux_2_34 --out dist
             rust_targets: ''
-          - os: macos-14
+          - os: macos-15
             build_args: --release --target universal2-apple-darwin --out dist
             rust_targets: x86_64-apple-darwin
           - os: windows-latest
