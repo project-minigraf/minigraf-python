@@ -44,7 +44,7 @@ src = minigraf.open("app.graph", read_only=True, page_cache_size=4096)
 
 # Every option: read_only, page_cache_size, allow_unlocked, wal_checkpoint_threshold,
 # max_derived_facts, max_results, synchronous (minigraf.SyncMode.FULL / NORMAL),
-# query_memory_limit.
+# query_memory_limit, allow_overrides, transaction_chunk_facts, max_iterations.
 db = minigraf.MiniGrafDb.open_with_options("app.graph", minigraf.OpenOptions(max_derived_facts=10_000))
 ```
 
@@ -57,6 +57,33 @@ limit. Rows a cursor returns are not counted, so read a large answer with `db.qu
 `wal_checkpoint_threshold=minigraf.WAL_CHECKPOINT_NEVER` turns off automatic checkpoints
 and the checkpoint when the handle closes, for applications that call `checkpoint()` on
 their own schedule.
+
+## Override list and limits
+
+Query text may override some settings with keywords such as `:max-derived-facts 1000`.
+`allow_overrides` lists the `minigraf.Overridable` keywords it may use
+(`MAX_DERIVED_FACTS`, `MAX_RESULTS`, `QUERY_MEMORY_LIMIT`, `MAX_ITERATIONS`). Left out, the
+defaults apply: `minigraf.OVERRIDABLE_DEFAULTS`, read from the core library (today
+`MAX_DERIVED_FACTS`, `MAX_RESULTS` and `MAX_ITERATIONS`). A list replaces the defaults, it
+does not add to them, and `[]` refuses every keyword: a query that uses one raises
+`MiniGrafError.Api` with `[API-025]` from `execute()`, `query()` and `prepare()`.
+
+```python
+from minigraf import Overridable
+
+# Query text may set only :query-memory-limit.
+db = minigraf.open("app.graph", allow_overrides=[Overridable.QUERY_MEMORY_LIMIT])
+# The defaults plus :query-memory-limit.
+db = minigraf.open(
+    "app.graph",
+    allow_overrides=[*minigraf.OVERRIDABLE_DEFAULTS, Overridable.QUERY_MEMORY_LIMIT],
+)
+```
+
+`max_iterations` is the most rounds each stratum of a rule query may run (default
+1,000,000; more raise `MiniGrafError` with `[INT-020]`). `transaction_chunk_facts` is how
+many facts one transaction on a file database stages before it is written in chunks
+(default 65,536, clamped to 1..=1,000,000). A negative count raises `[API-017]`.
 
 ## Query cursors
 
@@ -100,6 +127,21 @@ set-valued attribute: `pq.execute(ids={1, 2, 3})`. Its elements are `bool`, `int
 elements is written `minigraf.Value.SET([minigraf.Value.KEYWORD(":role/admin")])`. A set
 inside a set raises `MiniGrafError.Api` with `[API-021]`; a `list` is not a set. Set values
 come back as JSON arrays from `execute()` and as `Value.SET([...])` in fact records.
+
+### Limits of one prepared query
+
+`with_max_derived_facts(n)`, `with_query_memory_limit(bytes)` and `with_max_iterations(n)`
+each return a new prepared query with that limit; the one they are called on is
+unchanged. They are application code, so `allow_overrides` does not apply to them, and an
+allowed keyword in the query text still overrides them. `2**63 - 1` means no limit and a
+negative value raises `[API-017]`. A derived query keeps its database open, as any
+prepared query does.
+
+```python
+reach = db.prepare("(query [:find ?x ?y :where (reach ?x ?y)])")
+small = reach.with_max_derived_facts(10_000).with_query_memory_limit(16 << 20)
+small.execute()  # [INT-020] or [QRY-012] past a limit; reach.execute() is unchanged
+```
 
 ## User functions
 

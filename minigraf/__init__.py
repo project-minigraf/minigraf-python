@@ -18,7 +18,9 @@ from .minigraf_ffi import (
     MiniGrafUdfError,
     MiniGrafValue,
     OpenOptions,
+    Overridable,
     SyncMode,
+    overridable_defaults,
 )
 
 # Shorter names for the objects.
@@ -40,6 +42,10 @@ VALID_TIME_FOREVER = 2**63 - 1
 #: and none when the handle closes. Call ``checkpoint()`` yourself.
 WAL_CHECKPOINT_NEVER = 2**63 - 1
 
+#: The override list that applies when ``allow_overrides`` is not given:
+#: the Rust ``Overridable::DEFAULTS``, read from the core library.
+OVERRIDABLE_DEFAULTS = tuple(overridable_defaults())
+
 
 def open(
     path,
@@ -52,6 +58,9 @@ def open(
     max_results=None,
     synchronous=None,
     query_memory_limit=None,
+    allow_overrides=None,
+    transaction_chunk_facts=None,
+    max_iterations=None,
 ):
     """Open a file-backed database. An option left as ``None`` keeps its default.
 
@@ -59,6 +68,13 @@ def open(
     any number of read-only handles can share it, and writes raise
     ``MiniGrafError`` with code API-014. ``query_memory_limit`` caps the bytes
     one query may hold; a query that would hold more raises QRY-012.
+
+    ``allow_overrides`` lists the ``Overridable`` keywords query text may use
+    to override these settings; it replaces ``OVERRIDABLE_DEFAULTS`` (``None``)
+    and ``[]`` refuses them all (API-025). ``max_iterations`` limits the
+    rounds of each stratum of a rule query (INT-020 beyond), and
+    ``transaction_chunk_facts`` the facts a transaction stages before it is
+    written in chunks.
     """
     return MiniGrafDb.open_with_options(
         path,
@@ -71,6 +87,9 @@ def open(
             max_results=max_results,
             synchronous=synchronous,
             query_memory_limit=query_memory_limit,
+            allow_overrides=None if allow_overrides is None else list(allow_overrides),
+            transaction_chunk_facts=transaction_chunk_facts,
+            max_iterations=max_iterations,
         ),
     )
 
@@ -253,7 +272,9 @@ __all__ = [
     "MiniGrafPreparedQuery",
     "MiniGrafUdfError",
     "MiniGrafValue",
+    "OVERRIDABLE_DEFAULTS",
     "OpenOptions",
+    "Overridable",
     "Predicate",
     "PreparedQuery",
     "SyncMode",
