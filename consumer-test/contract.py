@@ -9,6 +9,7 @@ import json
 import os
 import sys
 
+import minigraf
 from minigraf import Accumulator, Aggregate, MiniGrafDb, MiniGrafError, Predicate, UdfError, Value
 
 QUERY = "(query [:find ?n :where [?e :name ?n]])"
@@ -95,3 +96,37 @@ del db  # releases the file lock; the binding has no close()
 again = MiniGrafDb.open(path)
 assert names(again) == ["Bob"], "query after reopen returns Bob"
 print("ok: file-backed survives reopen")
+
+# minigraf#872: the override list, the new open options and a prepared setter.
+assert minigraf.OVERRIDABLE_DEFAULTS == (
+    minigraf.Overridable.MAX_DERIVED_FACTS,
+    minigraf.Overridable.MAX_RESULTS,
+    minigraf.Overridable.MAX_ITERATIONS,
+), "the default override list comes from core"
+limited = minigraf.open(
+    os.path.join(sys.argv[1], "overrides.graph"),
+    allow_overrides=[],
+    transaction_chunk_facts=2,
+    max_iterations=1000,
+)
+limited.execute("(transact [[:a :edge :b] [:b :edge :c] [:c :edge :d]])")
+limited.execute("(rule [(reach ?x ?y) [?x :edge ?y]])")
+limited.execute("(rule [(reach ?x ?y) [?x :edge ?z] (reach ?z ?y)])")
+reach = "(query [:find ?x ?y :where (reach ?x ?y)])"
+try:
+    limited.execute("(query [:find ?x ?y :where (reach ?x ?y) :max-derived-facts 10])")
+except MiniGrafError.Api as e:
+    assert e.msg.startswith("[API-025]"), "an empty list refuses the keyword"
+else:
+    sys.exit("an empty override list did not refuse :max-derived-facts")
+pq = limited.prepare(reach)
+derived = pq.with_max_iterations(1)
+try:
+    derived.execute()
+except MiniGrafError as e:
+    assert e.msg.startswith("[INT-020]"), "the derived query has its own limit"
+else:
+    sys.exit("with_max_iterations(1) did not limit the derived query")
+assert len(json.loads(pq.execute())["results"]) == 6, "the receiver is unchanged"
+print("ok: override list, open options and a prepared setter")
+
