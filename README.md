@@ -205,7 +205,7 @@ db.execute("(query [:find ?a (product ?a :over (:order-by ?a)) :where [?e :age ?
 A write transaction stages several `transact`, `retract` and `query` statements, with
 queries seeing what it staged, and then commits them as one transaction or rolls them
 back (minigraf#824). First in the release built on core v3.0.0 (core commit
-`639e7382`).
+`32d71ce0`).
 
 ```python
 import json
