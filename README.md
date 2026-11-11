@@ -200,6 +200,52 @@ db.execute("(query [:find ?a (product ?a :over (:order-by ?a)) :where [?e :age ?
   function. Inside a write transaction, the calls the core refuses there still return
   `INT-001`.
 
+## Write transactions
+
+A write transaction stages several `transact`, `retract` and `query` statements, with
+queries seeing what it staged, and then commits them as one transaction or rolls them
+back (minigraf#824). First in the release built on core v3.0.0 (core commit
+`CORE_COMMIT`).
+
+```python
+import json
+import minigraf
+
+db = minigraf.open("bank.graph")
+db.execute("(transact [[:alice :balance 100] [:bob :balance 50]])")
+
+# The with block rolls back on exit unless the transaction was committed,
+# also when an exception leaves it.
+with db.begin_write() as tx:
+    tx.execute("(transact [[:alice :balance 70] [:bob :balance 80]])")
+    tx.execute("(retract [[:alice :balance 100] [:bob :balance 50]])")
+    rows = json.loads(tx.execute("(query [:find ?b :where [:alice :balance ?b]])"))["results"]
+    if rows[0][0] >= 0:
+        tx.commit()
+```
+
+- `db.begin_write(synchronous=None, chunk_facts=None)`: an option left `None` is the
+  database's. `synchronous` (`SyncMode.FULL` / `NORMAL`) is this commit's WAL sync;
+  `chunk_facts` the facts staged before a file database writes the transaction in
+  chunks (a negative count is API-017). Read-only databases raise API-014.
+- `tx.execute(datalog)` returns what `db.execute` returns; a staged write returns
+  `{"ok": true}`. A statement that fails stages nothing and leaves the transaction open.
+  There are no cursors or prepared queries inside a transaction.
+- `tx.commit()` applies everything as one transaction; a commit that fails rolls back.
+  `tx.rollback()` discards it. Either way the transaction is finished: `execute` and
+  `commit` then raise API-018, and `rollback` does nothing.
+- Commit is always explicit: leaving the `with` block, or the transaction being garbage
+  collected, rolls back. Python may collect it late, so end every transaction with
+  `commit()`, `rollback()` or a `with` block.
+- An open transaction holds the database's write lock. On the thread that began it,
+  database calls (`execute`, `query`, `prepare`, `fact_log`, `checkpoint`, another
+  `begin_write`, prepared queries) raise INT-001; so do user functions it runs. On other
+  threads, writes and `begin_write` wait until it ends, and queries read the committed
+  state. Use a transaction on the thread that began it: a thread that uses one it did
+  not begin and then writes through `db` waits on that transaction.
+- Rules registered inside a transaction stay registered after a rollback.
+- The transaction keeps its database open until it is freed.
+
 ## Fact log and log writer
 
 `db.fact_log(filter)` streams every fact version (assertions and retractions, with

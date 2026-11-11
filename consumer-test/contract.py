@@ -130,3 +130,31 @@ else:
 assert len(json.loads(pq.execute())["results"]) == 6, "the receiver is unchanged"
 print("ok: override list, open options and a prepared setter")
 
+
+# minigraf#824: write transactions through the installed package.
+tx_path = os.path.join(sys.argv[1], "tx.graph")
+txdb = minigraf.open(tx_path)
+txdb.execute('(transact [[:alice :name "Alice"]])')
+with txdb.begin_write(chunk_facts=1000) as tx:
+    tx.execute('(transact [[:bob :name "Bob"]])')
+    assert sorted(names(tx)) == ["Alice", "Bob"], "the transaction reads its own write"
+    tx.commit()
+with txdb.begin_write() as tx:
+    tx.execute('(transact [[:carol :name "Carol"]])')
+    tx.rollback()
+try:
+    with txdb.begin_write() as tx:
+        tx.execute('(transact [[:dave :name "Dave"]])')
+        raise ValueError("leave the block")
+except ValueError:
+    pass
+assert sorted(names(txdb)) == ["Alice", "Bob"], "rollback and an exception discard"
+try:
+    tx.execute(QUERY)
+except MiniGrafError.Api as e:
+    assert e.msg.startswith("[API-018]"), "a finished transaction is API-018"
+else:
+    sys.exit("a finished transaction ran a statement")
+del tx, txdb
+assert sorted(names(minigraf.open(tx_path))) == ["Alice", "Bob"], "the commit survives reopen"
+print("ok: write transactions commit, roll back and survive reopen")
