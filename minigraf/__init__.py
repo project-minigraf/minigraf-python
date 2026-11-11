@@ -17,9 +17,11 @@ from .minigraf_ffi import (
     MiniGrafPreparedQuery,
     MiniGrafUdfError,
     MiniGrafValue,
+    MiniGrafWriteTransaction,
     OpenOptions,
     Overridable,
     SyncMode,
+    TxOptions,
     overridable_defaults,
 )
 
@@ -34,6 +36,7 @@ Predicate = MiniGrafPredicate
 Aggregate = MiniGrafAggregate
 Accumulator = MiniGrafAccumulator
 UdfError = MiniGrafUdfError
+WriteTransaction = MiniGrafWriteTransaction
 
 #: ``valid_to`` of a fact that is valid forever.
 VALID_TIME_FOREVER = 2**63 - 1
@@ -201,6 +204,39 @@ MiniGrafPreparedQuery.execute = _execute
 MiniGrafPreparedQuery.query = _query
 
 
+# ─── Write transactions (minigraf#824) ───────────────────────────────────────
+
+_begin_write_with = MiniGrafDb.begin_write_with
+
+
+def _begin_write(self, *, synchronous=None, chunk_facts=None):
+    """Begin a write transaction. An option left as ``None`` is the database's:
+    ``synchronous`` (``SyncMode.FULL``/``NORMAL``) for this commit's WAL sync,
+    ``chunk_facts`` for the facts it stages before a file database writes it
+    in chunks. Use it as a context manager, which rolls back on exit unless
+    it was committed::
+
+        with db.begin_write() as tx:
+            tx.execute('(transact [[:alice :balance 90]])')
+            tx.commit()
+
+    While it is open it holds the write lock: on this thread, database calls
+    raise INT-001; on other threads, writes and begins wait until it ends.
+    """
+    return _begin_write_with(
+        self, TxOptions(synchronous=synchronous, chunk_facts=chunk_facts)
+    )
+
+
+def _tx_exit(self, *exc):
+    """Roll back unless committed; never commits on its own."""
+    self.rollback()
+    return False
+
+
+MiniGrafDb.begin_write = _begin_write
+
+
 def _close_on_exit(self, *exc):
     self.close()
     return False
@@ -247,6 +283,8 @@ MiniGrafFactLog.__enter__ = _enter
 MiniGrafFactLog.__exit__ = _close_on_exit
 MiniGrafLogWriter.__enter__ = _enter
 MiniGrafLogWriter.__exit__ = _writer_exit
+MiniGrafWriteTransaction.__enter__ = _enter
+MiniGrafWriteTransaction.__exit__ = _tx_exit
 
 __all__ = [
     "ANY_VALID_TIME",
@@ -272,6 +310,7 @@ __all__ = [
     "MiniGrafPreparedQuery",
     "MiniGrafUdfError",
     "MiniGrafValue",
+    "MiniGrafWriteTransaction",
     "OVERRIDABLE_DEFAULTS",
     "OpenOptions",
     "Overridable",
@@ -280,9 +319,11 @@ __all__ = [
     "SyncMode",
     "Timestamp",
     "TxCount",
+    "TxOptions",
     "UdfError",
     "VALID_TIME_FOREVER",
     "WAL_CHECKPOINT_NEVER",
     "Value",
+    "WriteTransaction",
     "open",
 ]
