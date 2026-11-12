@@ -6,7 +6,7 @@ import threading
 import pytest
 
 import minigraf
-from minigraf import MiniGrafDb, MiniGrafError, SyncMode
+from minigraf import MiniGrafDb, MiniGrafError, Predicate, SyncMode
 
 NAMES = "(query [:find ?n :where [?e :person/name ?n]])"
 SETUP = '(transact [[:alice :person/name "Alice"] [:bob :person/name "Bob"]])'
@@ -124,3 +124,33 @@ def test_options(tmp_path, db):
     with pytest.raises(MiniGrafError) as e:
         ro.begin_write()
     assert code(e.value) == "API-014"
+
+
+def test_user_function_calling_its_own_transaction_gets_int001(db):
+    """minigraf#886: such a call waited on the transaction forever."""
+    seen = []
+
+    class CallsItsTx(Predicate):
+        def __init__(self, tx):
+            self.tx = tx
+
+        def test(self, value):
+            for call in (lambda: self.tx.execute(NAMES), self.tx.commit, self.tx.rollback):
+                try:
+                    call()
+                    seen.append("no error")
+                except MiniGrafError as e:
+                    seen.append(code(e))
+            seen.append(self.tx.is_open())
+            return True
+
+    tx = db.begin_write()
+    db.register_predicate("calls-tx?", CallsItsTx(tx))
+    query = "(query [:find ?n :where [?e :person/name ?n] [(calls-tx? ?n)]])"
+    assert names(tx.execute(query)) == ["Alice", "Bob"]
+    assert seen == ["INT-001", "INT-001", "INT-001", True] * 2
+    # The refused commit and rollback left it open.
+    assert tx.is_open()
+    tx.execute('(transact [[:carol :person/name "Carol"]])')
+    tx.commit()
+    assert names(db.execute(NAMES)) == ["Alice", "Bob", "Carol"]

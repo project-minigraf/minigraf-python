@@ -239,7 +239,8 @@ with db.begin_write() as tx:
   `commit()`, `rollback()` or a `with` block.
 - An open transaction holds the database's write lock. On the thread that began it,
   database calls (`execute`, `query`, `prepare`, `fact_log`, `checkpoint`, another
-  `begin_write`, prepared queries) raise INT-001; so do user functions it runs. On other
+  `begin_write`, prepared queries) raise INT-001; so do user functions it runs. A user function that
+  calls the transaction it runs in (`execute`, `commit`, `rollback`) gets INT-001 too. On other
   threads, writes and `begin_write` wait until it ends, and queries read the committed
   state. Use a transaction on the thread that began it: a thread that uses one it did
   not begin and then writes through `db` waits on that transaction.
